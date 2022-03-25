@@ -13,12 +13,20 @@ import type { DeviceModel } from "@ledgerhq/devices";
 import { sendAPDU } from "@ledgerhq/devices/lib/ble/sendAPDU";
 import { receiveAPDU } from "@ledgerhq/devices/lib/ble/receiveAPDU";
 import { log } from "@ledgerhq/logs";
-import { Observable, defer, merge, from } from "rxjs";
-import { share, ignoreElements, first, map, tap } from "rxjs/operators";
+import { Observable, defer, merge, from, of, throwError } from "rxjs";
+import {
+  share,
+  ignoreElements,
+  first,
+  map,
+  tap,
+  catchError,
+} from "rxjs/operators";
 import {
   CantOpenDevice,
   TransportError,
   DisconnectedDeviceDuringOperation,
+  PairingFailed,
 } from "@ledgerhq/errors";
 import type { Device, Characteristic } from "./types";
 import { monitorCharacteristic } from "./monitorCharacteristic";
@@ -26,6 +34,7 @@ import { awaitsBleOn } from "./awaitsBleOn";
 import { decoratePromiseErrors, remapError } from "./remapErrors";
 let connectOptions: Record<string, unknown> = {
   requestMTU: 156,
+  connectionPriority: 1,
 };
 const transportsCache = {};
 const bleManager = new BleManager();
@@ -147,7 +156,7 @@ async function open(deviceOrId: Device | string, needsReconnect: boolean) {
     throw new TransportError("service not found", "BLEServiceNotFound");
   }
 
-  const { deviceModel, serviceUuid, writeUuid, notifyUuid } = res;
+  const { deviceModel, serviceUuid, writeUuid, writeCmdUuid, notifyUuid } = res;
 
   if (!characteristics) {
     characteristics = await device.characteristicsForService(serviceUuid);
@@ -158,11 +167,14 @@ async function open(deviceOrId: Device | string, needsReconnect: boolean) {
   }
 
   let writeC;
+  let writeCmdC;
   let notifyC;
 
   for (const c of characteristics) {
     if (c.uuid === writeUuid) {
       writeC = c;
+    } else if (c.uuid === writeCmdUuid) {
+      writeCmdC = c;
     } else if (c.uuid === notifyUuid) {
       notifyC = c;
     }
@@ -196,9 +208,26 @@ async function open(deviceOrId: Device | string, needsReconnect: boolean) {
     );
   }
 
+  if (writeCmdC) {
+    if (!writeCmdC.isWritableWithoutResponse) {
+      throw new TransportError(
+        "write cmd characteristic not writableWithoutResponse",
+        "BLEChracteristicInvalid"
+      );
+    }
+  }
+
   log("ble-verbose", `device.mtu=${device.mtu}`);
   const notifyObservable = monitorCharacteristic(notifyC).pipe(
+    catchError((e) => {
+      // LL-9033 fw 2.0.2 introduced this case, we silence the inner unhandled error.
+      const msg = String(e);
+      return msg.includes("notify change failed")
+        ? of(new PairingFailed(msg))
+        : throwError(e);
+    }),
     tap((value) => {
+      if (value instanceof PairingFailed) return;
       log("ble-frame", "<= " + value.toString("hex"));
     }),
     share()
@@ -207,6 +236,7 @@ async function open(deviceOrId: Device | string, needsReconnect: boolean) {
   const transport = new BluetoothTransport(
     device,
     writeC,
+    writeCmdC,
     notifyObservable,
     deviceModel
   );
@@ -373,20 +403,23 @@ export default class BluetoothTransport extends Transport {
   device: Device;
   mtuSize = 20;
   writeCharacteristic: Characteristic;
-  notifyObservable: Observable<Buffer>;
+  writeCmdCharacteristic: Characteristic;
+  notifyObservable: Observable<any>;
   deviceModel: DeviceModel;
   notYetDisconnected = true;
 
   constructor(
     device: Device,
     writeCharacteristic: Characteristic,
-    notifyObservable: Observable<Buffer>,
+    writeCmdCharacteristic: Characteristic,
+    notifyObservable: Observable<any>,
     deviceModel: DeviceModel
   ) {
     super();
     this.id = device.id;
     this.device = device;
     this.writeCharacteristic = writeCharacteristic;
+    this.writeCmdCharacteristic = writeCmdCharacteristic;
     this.notifyObservable = notifyObservable;
     this.deviceModel = deviceModel;
     log("ble-verbose", `BleTransport(${String(this.id)}) new instance`);
@@ -428,6 +461,9 @@ export default class BluetoothTransport extends Transport {
         mtu =
           (await merge(
             this.notifyObservable.pipe(
+              tap((maybeError) => {
+                if (maybeError instanceof Error) throw maybeError;
+              }),
               first((buffer) => buffer.readUInt8(0) === 0x08),
               map((buffer) => buffer.readUInt8(5))
             ),
@@ -470,13 +506,24 @@ export default class BluetoothTransport extends Transport {
   write = async (buffer: Buffer, txid?: string | null | undefined) => {
     log("ble-frame", "=> " + buffer.toString("hex"));
 
-    try {
-      await this.writeCharacteristic.writeWithResponse(
-        buffer.toString("base64"),
-        txid
-      );
-    } catch (e: any) {
-      throw new DisconnectedDeviceDuringOperation(e.message);
+    if (!this.writeCmdCharacteristic) {
+      try {
+        await this.writeCharacteristic.writeWithResponse(
+          buffer.toString("base64"),
+          txid
+        );
+      } catch (e: any) {
+        throw new DisconnectedDeviceDuringOperation(e.message);
+      }
+    } else {
+      try {
+        await this.writeCmdCharacteristic.writeWithoutResponse(
+          buffer.toString("base64"),
+          txid
+        );
+      } catch (e: any) {
+        throw new DisconnectedDeviceDuringOperation(e.message);
+      }
     }
   };
 

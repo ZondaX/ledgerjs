@@ -1,5 +1,4 @@
 /*
- *
  * ~~ fields ~~
  *
  * id: use by convention lowercased coin name with _ instead of space. if a coin get later rename, we NEVER rename the id for backward compatibility.
@@ -2504,6 +2503,35 @@ const cryptocurrenciesById: Record<string, CryptoCurrency> = {
       },
     ],
   },
+  osmosis: {
+    type: "CryptoCurrency",
+    id: "osmo",
+    coinType: 118,
+    name: "Osmosis",
+    managerAppName: "Cosmos",
+    ticker: "OSMO",
+    scheme: "osmo",
+    color: "#493c9b",
+    family: "osmosis",
+    units: [
+      {
+        name: "Osmosis",
+        code: "OSMO",
+        magnitude: 6,
+      },
+      {
+        name: "Micro-OSMO",
+        code: "uosmo",
+        magnitude: 0,
+      },
+    ],
+    explorerViews: [
+      {
+        tx: "https://www.mintscan.io/osmosis/txs/$hash",
+        address: "https://www.mintscan.io/osmosis/account/$address",
+      },
+    ],
+  },
   tezos: {
     type: "CryptoCurrency",
     id: "tezos",
@@ -3021,18 +3049,44 @@ const cryptocurrenciesById: Record<string, CryptoCurrency> = {
       },
     ],
   },
+  ethereum_goerli: {
+    type: "CryptoCurrency",
+    id: "ethereum_goerli",
+    coinType: 1,
+    name: "Ethereum Goerli",
+    managerAppName: "Ethereum",
+    ticker: "ETH",
+    deviceTicker: "ETH",
+    scheme: "ethereum_goerli",
+    color: "#00ff00",
+    units: ethereumUnits("ether", "ETH").map(makeTestnetUnit),
+    isTestnetFor: "ethereum",
+    disableCountervalue: true,
+    family: "ethereum",
+    blockAvgTime: 15,
+    ethereumLikeInfo: {
+      baseChain: "goerli",
+      chainId: 5, // goerli
+      networkId: 5,
+      hardfork: "petersburg",
+    },
+    explorerViews: [
+      {
+        tx: "https://goerli.etherscan.io/tx/$hash",
+        address: "https://goerli.etherscan.io/address/$address",
+      },
+    ],
+  },
   stacks: {
     type: "CryptoCurrency",
     id: "stacks",
     coinType: 5757,
-    name: "stacks",
+    name: "Stacks",
     managerAppName: "Stacks",
     ticker: "STX",
     scheme: "stacks",
-    color: "#000",
+    color: "#5546ff",
     family: "stacks",
-    // currently not available as countervalue and ticker collides with token Stox(STX)
-    disableCountervalue: true,
     units: [
       {
         name: "STX",
@@ -3149,11 +3203,11 @@ const cryptocurrenciesById: Record<string, CryptoCurrency> = {
     type: "CryptoCurrency",
     id: "filecoin",
     coinType: 461,
-    name: "filecoin",
+    name: "Filecoin",
     managerAppName: "Filecoin",
     ticker: "FIL",
     scheme: "filecoin",
-    color: "#000",
+    color: "#0090ff",
     family: "filecoin",
     units: [
       {
